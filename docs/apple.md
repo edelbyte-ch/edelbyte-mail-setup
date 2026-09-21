@@ -31,11 +31,22 @@ Zwei kleine Patches an der mailcow-Weboberfläche (`data/web`, bind-gemountet,
    `app_password` durch den Login-Redirect (mailcow verwarf ihn sonst).
 
 2. **Signiert / „Verifiziert" (grün).** `mobileconfig.php` signiert das Profil
-   per Ausgabe-Callback mit `openssl_cms_sign` und dem gültigen
-   mail.edelbyte.ch-Zertifikat (`/etc/ssl/mail/cert.pem`, via
-   docker-compose.override.yml read-only in php-fpm gemountet). DER/CMS mit
-   eingebettetem Inhalt und voller Kette bis ISRG Root X1 → iOS/macOS zeigt
-   „Verifiziert". Der Callback ist fail-open: schlägt Signierung fehl, wird das
-   unsignierte Profil ausgeliefert (kann die Profilerzeugung nie brechen).
+   per Ausgabe-Callback mit `openssl_cms_sign` (DER/CMS, Inhalt eingebettet,
+   volle Kette). **Wichtig: Apple akzeptiert nur RSA-signierte Profile** – das
+   mailcow-Zertifikat ist ECDSA und wird von iOS als „Ungültiges Profil"
+   abgelehnt. Deshalb ein separates **RSA-Let's-Encrypt-Zertifikat** nur fürs
+   Signieren:
+   - Ausgestellt via `acme.sh` mit Cloudflare-DNS-01 (`--keylength 2048`),
+     Home `~/.acme.sh` auf ws01-edelbyte, Cloudflare-Token (nur DNS edelbyte.ch)
+     in `~/.acme.sh/account.conf`.
+   - `acme.sh --install-cert` legt es nach `/home/bedmin/mail-signing/{cert,key}.pem`,
+     read-only in php-fpm gemountet als `/etc/ssl/mail-rsa` (override).
+   - Auto-Erneuerung: acme.sh-Cron (4×/Tag), reloadcmd chmod 644; php-fpm liest
+     das Zertifikat pro Request → kein Neustart bei Erneuerung nötig.
+   - Callback ist fail-open: schlägt Signierung fehl, kommt das unsignierte
+     Profil (kann die Profilerzeugung nie brechen).
+   - **OPcache-Falle:** nach Änderung an `mobileconfig.php` `touch` + php-fpm
+     neu starten, sonst serviert OPcache die alte Version (validate_timestamps
+     greift bei zurückdatierten mtimes nicht).
 
 Backups der Originaldateien liegen als `*.bak-JJJJMMTT-HHMM` daneben.
