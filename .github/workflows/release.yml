@@ -1,0 +1,58 @@
+name: release
+
+# Ein Tag v* baut den signierbaren Single-File-Installer und veröffentlicht ihn
+# mit Prüfsumme. Die Website liest genau diese Veröffentlichung über die
+# GitHub-API (/api/mail-setup/windows/latest).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: .NET 8 einrichten
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Version aus Tag
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Testen
+        run: dotnet test -c Release
+
+      - name: Veröffentlichen (self-contained, Single-File)
+        run: >
+          dotnet publish src/EdelByte.MailSetup/EdelByte.MailSetup.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
+          -o artifacts
+
+      # TODO Code Signing: Sobald ein Authenticode-Zertifikat vorliegt, hier
+      # signieren (signtool sign /fd SHA256 /tr <RFC3161> /td SHA256 ...).
+      # Bis dahin ist der Build unsigniert – SmartScreen zeigt eine Warnung.
+
+      - name: Prüfsumme
+        shell: pwsh
+        run: |
+          $exe = "artifacts/EdelByteMailSetup.exe"
+          (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower() | Out-File -NoNewline "$exe.sha256"
+          Get-Content "$exe.sha256"
+
+      - name: Release veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          name: EdelByte Mail Setup ${{ steps.ver.outputs.version }}
+          files: |
+            artifacts/EdelByteMailSetup.exe
+            artifacts/EdelByteMailSetup.exe.sha256
+          generate_release_notes: true

@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>EdelByteMailSetup</AssemblyName>
+    <RootNamespace>EdelByte.MailSetup</RootNamespace>
+    <ApplicationIcon>Ui\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <StartupObject>EdelByte.MailSetup.Program</StartupObject>
+
+    <!-- Version: bei Releases über -p:Version=x.y.z aus dem Git-Tag gesetzt -->
+    <Version>0.1.0</Version>
+    <Product>EdelByte Mail Setup</Product>
+    <Company>EdelByte</Company>
+    <Copyright>© EdelByte Veliji</Copyright>
+    <Description>Richtet E-Mail, Kalender und Kontakte für EdelByte-Postfächer in Outlook ein.</Description>
+
+    <!-- Ein einziges EXE ohne Installation: Laufzeit eingebettet, komprimiert.
+         WPF unterstützt kein Trimming, daher ~35 MB. Für ein einmalig
+         ausgeführtes Werkzeug ist das der bessere Handel als ein Installer
+         plus separater Laufzeit-Download beim Kunden. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>de</SatelliteResourceLanguages>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kein Outlook-Interop-Paket: Outlook wird spät gebunden (dynamic), damit das
+         EXE auch ohne Outlook startet und der Diagnosemodus überall läuft. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Ui\app.ico" />
+  </ItemGroup>
+
+  <!-- App.xaml wird als Page eingebunden, nicht als ApplicationDefinition:
+       so erzeugt das SDK kein zweites Main, unser Program.Main bleibt Einstieg. -->
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+</Project>
