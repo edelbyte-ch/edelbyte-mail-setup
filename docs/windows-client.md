@@ -23,7 +23,9 @@
 Jeder Schritt erkennt Vorhandenes:
 
 - **Mailkonto**: über Adresse + Server im Profil; vorhandenes wird
-  wiederverwendet, `/importprf` nutzt `OverwriteProfile=Append`.
+  wiederverwendet. Neu: PRF-Import, sonst Outlooks Kontoassistent (auf aktuellen
+  Microsoft-365-Builds provisioniert PRF keine IMAP-Konten mehr – siehe
+  `outlook.md`). Kein doppeltes Konto, weil vorher gesucht wird.
 - **Sync-Profile**: über die DAV-Adresse bzw. den Namen; unsere Profile werden
   ersetzt, fremde bleiben. Zweiter Lauf → weiterhin genau ein Kalender, ein
   Kontakteprofil.

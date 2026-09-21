@@ -1,8 +1,28 @@
 # Outlook-Details
 
-## Kontoanlage per PRF
+## Kontoanlage – zwei Wege
 
-Der von Microsoft dokumentierte Weg für Classic Outlook ist
+**Befund (getestet 21.09.2026 auf Microsoft 365 Outlook, Build 16.0.20326):**
+Aktuelle Microsoft-365-Builds legen IMAP-Konten **nicht mehr** über eine
+PRF-Datei an – Outlook startet zwar in das Zielprofil, ignoriert aber die
+`[IMAP_*]`-Kontosektion. Auch reines Registry-Seeding scheitert, weil Outlook
+`IMAP Store EID`, `Delivery Store EntryID` u. a. erst beim Anlegen des lokalen
+IMAP-Speichers selbst erzeugt. Microsoft hat die stille PRF-Provisionierung
+bewusst eingeschränkt.
+
+Der Client behandelt das in `Core/SetupOrchestrator.EnsureAccountAsync`:
+
+1. **PRF-Import** (`/profile <P> /importprf <datei>`) – funktioniert in Outlook
+   2016/2019 und manchen 365-Builds still. Danach prüft der Client, ob das Konto
+   wirklich im Profil steht.
+2. **Outlooks Kontoassistent**, falls (1) leer bleibt. Weil die Autokonfiguration
+   jetzt serverseitig funktioniert (autodiscover.edelbyte.ch liefert IMAP 993/SSL,
+   SMTP 465/SSL und sogar CalDAV/CardDAV), bleibt für den Kunden nur: Passwort
+   einmal in Outlooks eigenem Dialog bestätigen. Der Client wartet, bis das Konto
+   erscheint, und richtet **Kalender und Kontakte danach automatisch** ein.
+
+## PRF-Details
+
 `OUTLOOK.EXE /importprf <datei.prf>`. Die erzeugte Datei
 (`Outlook/PrfWriter.cs`) beschreibt ein IMAP-Konto:
 

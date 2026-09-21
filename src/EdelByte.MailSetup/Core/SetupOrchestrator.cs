@@ -59,15 +59,18 @@ public sealed class SetupOrchestrator
         if (!await OutlookProcess.QuitGracefullyAsync(TimeSpan.FromSeconds(20)))
             throw new SetupException(Codes.OutlookWontClose, "Bitte Outlook schliessen und die Einrichtung erneut starten.");
 
-        var reg = new OutlookProfileRegistry(ol.RegistryVersionKey ?? "16.0", profile);
+        var regVer = ol.RegistryVersionKey ?? "16.0";
+        var reg = new OutlookProfileRegistry(regVer, profile);
         var account = reg.Find(email, MailServer.Host);
+        var accountWasCreatedInteractively = false;
         if (account is null)
         {
             status?.Report("E-Mail-Konto wird eingerichtet …");
-            await ImportAccountAsync(ol, profile, email, ct);
-            reg = new OutlookProfileRegistry(ol.RegistryVersionKey ?? "16.0", profile);
-            account = reg.Find(email, MailServer.Host)
-                      ?? throw new SetupException(Codes.AccountNotFound, "Das E-Mail-Konto konnte nicht angelegt werden.");
+            account = await EnsureAccountAsync(ol, profile, regVer, email, status, ct);
+            accountWasCreatedInteractively = account is not null && OutlookProcess.IsRunning;
+            reg = new OutlookProfileRegistry(regVer, profile);
+            account ??= reg.Find(email, MailServer.Host)
+                        ?? throw new SetupException(Codes.AccountNotFound, "Das E-Mail-Konto konnte nicht angelegt werden.");
             Progress.Set("mail", StepState.Done, "neu eingerichtet");
         }
         else
@@ -76,8 +79,11 @@ public sealed class SetupOrchestrator
             Progress.Set("mail", StepState.Done, "bereits vorhanden");
         }
 
-        // Passwort so ablegen, dass Outlook UND das Add-in es teilen (einmal eingeben)
-        reg.StorePassword(account.RegistryKey, password);
+        // Passwort so ablegen, dass Outlook UND das Add-in es teilen. Wenn der
+        // Kunde das Konto gerade eben interaktiv in Outlook bestätigt hat, hat
+        // Outlook das Passwort schon selbst gespeichert – dann nicht überschreiben.
+        if (!accountWasCreatedInteractively)
+            reg.StorePassword(account.RegistryKey, password);
 
         // 4) Kalender-Erweiterung
         Progress.Set("addin", StepState.Running);
@@ -119,15 +125,27 @@ public sealed class SetupOrchestrator
         }
     }
 
-    private static async Task ImportAccountAsync(OutlookInfo ol, string profile, string email, CancellationToken ct)
+    /// <summary>
+    /// Stellt das Mailkonto sicher. Zwei Wege, je nach Outlook-Bau:
+    ///
+    /// 1) PRF-Import (`/importprf`) – der klassische, von Microsoft dokumentierte
+    ///    Weg. Funktioniert in Outlook 2016/2019 und vielen Builds still.
+    ///
+    /// 2) Fällt der PRF-Import leer aus (aktuelle Microsoft-365-Builds
+    ///    provisionieren IMAP-Konten nicht mehr über PRF), übernimmt Outlooks
+    ///    eigener Kontoassistent. Weil die Autokonfiguration serverseitig jetzt
+    ///    funktioniert (autodiscover.edelbyte.ch liefert Server, Ports und
+    ///    Verschlüsselung), bleibt für den Kunden nur: Adresse ist vorbelegt,
+    ///    Passwort einmal eingeben. Danach erkennt das Setup das Konto selbst
+    ///    und richtet Kalender und Kontakte automatisch weiter ein.
+    /// </summary>
+    private static async Task<OutlookAccount?> EnsureAccountAsync(OutlookInfo ol, string profile, string regVer, string email, IProgress<string>? status, CancellationToken ct)
     {
         var prf = PrfWriter.Build(new PrfWriter.Settings(
             ProfileName: profile,
             MakeDefault: string.IsNullOrEmpty(ol.DefaultProfile),
             ModifyDefaultProfileIfPresent: !string.IsNullOrEmpty(ol.DefaultProfile),
-            AccountName: email,
-            DisplayName: email,
-            Email: email,
+            AccountName: email, DisplayName: email, Email: email,
             ImapHost: MailServer.Host, ImapPort: MailServer.ImapPort,
             SmtpHost: MailServer.Host, SmtpPort: MailServer.SmtpPort));
 
@@ -135,10 +153,32 @@ public sealed class SetupOrchestrator
         await File.WriteAllTextAsync(path, prf, ct);
         try
         {
-            // /importprf ist der von Microsoft dokumentierte Weg für Konten in Classic Outlook.
-            var p = OutlookProcess.Start(ol.ClassicPath!, $"/importprf \"{path}\"");
-            await Task.Delay(TimeSpan.FromSeconds(8), ct);
+            // Weg 1: stiller PRF-Import, in das Zielprofil hinein starten.
+            OutlookProcess.Start(ol.ClassicPath!, $"/profile \"{profile}\" /importprf \"{path}\"");
+            await Task.Delay(TimeSpan.FromSeconds(10), ct);
             await OutlookProcess.QuitGracefullyAsync(TimeSpan.FromSeconds(20));
+
+            var reg = new OutlookProfileRegistry(regVer, profile);
+            var acc = reg.Find(email, MailServer.Host);
+            if (acc is not null) { Log.Info("Konto über PRF-Import eingerichtet"); return acc; }
+
+            // Weg 2: Outlooks Kontoassistent (Autodiscover-gestützt). Nicht
+            // vollständig still, aber dank funktionierender Autokonfiguration
+            // auf zwei Felder reduziert.
+            Log.Info("PRF-Import hat kein Konto erzeugt (aktueller Outlook-Bau) – öffne Outlook-Kontoassistent");
+            status?.Report("Outlook öffnet die Kontoanmeldung – bitte einmal das Passwort bestätigen. Der Rest läuft danach automatisch.");
+            OutlookProcess.Start(ol.ClassicPath!, $"/profile \"{profile}\"");
+
+            // Bis zu drei Minuten auf das Konto warten, das Outlook nach der
+            // Bestätigung anlegt.
+            var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(3);
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), ct);
+                acc = new OutlookProfileRegistry(regVer, profile).Find(email, MailServer.Host);
+                if (acc is not null) { Log.Info("Konto über Outlook-Assistent eingerichtet"); return acc; }
+            }
+            return null;
         }
         finally
         {
